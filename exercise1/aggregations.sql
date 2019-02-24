@@ -62,27 +62,48 @@ VALUES
   (205, 6, 402, '2019-03-18 23:30:17', 2.50);
 
 # Volume of sales per merchant per month
-SELECT YEAR(date_sales), MONTHNAME(date_sales), SUM(price), merchant_id
-FROM sales
-GROUP BY YEAR(date_sales), MONTH(date_sales);
+CREATE VIEW volume_per_merchant_per_month AS
+  SELECT YEAR(date_sales) AS year, MONTHNAME(date_sales) AS month, SUM(price) AS volume, merchant_id
+  FROM sales
+  GROUP BY YEAR(date_sales), MONTH(date_sales)
+  ORDER BY volume DESC;
 
-# TODO Calculate top 10% of users per month, in a one-liner
-SELECT YEAR(date_sales), MONTHNAME(date_sales), SUM(price), user_id
-FROM sales
-GROUP BY YEAR(date_sales), MONTH(date_sales);
+SELECT * FROM volume_per_merchant_per_month;
 
-# Attractive products
-# one merchant only selling it
-# sells more than 10 products a day
-CREATE VIEW summary_last3m AS
-  SELECT product_id, COUNT(merchant_id) AS nb_sellers, COUNT(transaction_id) as nb_transactions
+# Top 10% of users per month
+CREATE VIEW ratio_per_merchant_per_month AS
+  SELECT year, month, volume, volume/SUM(volume) AS ratio, merchant_id
+  FROM volume_per_merchant_per_month GROUP BY year, month;
+
+SELECT * FROM ratio_per_merchant_per_month WHERE ratio >= 0.1;
+
+# Merchants selling more than 10 products per day on the last 3m
+CREATE VIEW sales_per_merchant_per_day_3m AS
+  SELECT YEAR(date_sales) AS year, MONTHNAME(date_sales) AS month, DAY(date_sales) AS day,
+    COUNT(transaction_id) AS nb_sales, merchant_id
+  FROM sales
+  WHERE date_sales BETWEEN
+    DATE_SUB(NOW(), INTERVAL 90 DAY)
+    AND DATE_SUB(NOW(), INTERVAL 0 DAY)
+  GROUP BY YEAR(date_sales), MONTH(date_sales), DAY(date_sales), merchant_id
+  ORDER BY nb_sales DESC;
+
+SELECT merchant_id, nb_sales FROM sales_per_merchant_per_day WHERE nb_sales >= 10;
+
+# Products sold by one merchant only on the last 3m
+CREATE VIEW merchants_per_product_3m AS
+  SELECT product_id, merchant_id, COUNT(merchant_id) AS nb_sellers
   FROM sales
   WHERE date_sales BETWEEN
     DATE_SUB(NOW(), INTERVAL 90 DAY)
     AND DATE_SUB(NOW(), INTERVAL 0 DAY)
   GROUP BY product_id;
 
-SELECT * FROM summary_last3m
-  WHERE
-    nb_sellers = 1
-    AND nb_transactions > 10; # TODO 10 per day
+SELECT product_id FROM products_per_merchant_3m WHERE nb_sellers = 1;
+
+# Attractive products matching these two criterias
+SELECT * FROM merchants_per_product_3m
+INNER JOIN sales_per_merchant_per_day_3m
+ON merchants_per_product_3m.merchant_id = sales_per_merchant_per_day_3m.merchant_id
+WHERE sales_per_merchant_per_day_3m.nb_sales >= 10
+WHERE merchants_per_product_3m.nb_sellers = 1;
